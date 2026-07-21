@@ -1,0 +1,6 @@
+# Build output
+*.nupkg
+
+# Downloaded installers must never be committed (no redistribution rights)
+*.exe
+*.zip

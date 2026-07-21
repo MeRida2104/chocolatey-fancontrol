@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <!-- == PACKAGE SPECIFIC SECTION == -->
+    <id>fancontrol</id>
+    <version>271.0.0</version>
+    <owners>MeRida1</owners>
+    <packageSourceUrl>https://github.com/MeRida2104/chocolatey-fancontrol</packageSourceUrl>
+
+    <!-- == SOFTWARE SPECIFIC SECTION == -->
+    <title>FanControl</title>
+    <authors>Rémi Mercier (Rem0o)</authors>
+    <projectUrl>https://getfancontrol.com/</projectUrl>
+    <!-- TODO: Icon im eigenen Packaging-Repo ablegen und per jsDelivr auf einen Commit-SHA pinnen -->
+    <iconUrl>https://cdn.jsdelivr.net/gh/YOUR_GITHUB_USER/chocolatey-packages@COMMIT_SHA/icons/fancontrol.png</iconUrl>
+    <licenseUrl>https://github.com/Rem0o/FanControl.Releases/blob/master/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+
+    <projectSourceUrl>https://github.com/Rem0o/FanControl.Releases</projectSourceUrl>
+    <docsUrl>https://github.com/Rem0o/FanControl.Releases#readme</docsUrl>
+    <bugTrackerUrl>https://github.com/Rem0o/FanControl.Releases/issues</bugTrackerUrl>
+
+    <tags>fancontrol fan control cooling hardware temperature monitoring gui admin</tags>
+    <summary>A highly customizable fan controlling software for Windows.</summary>
+    <description><![CDATA[
+Fan Control is a focused, highly customizable fan controlling software for Windows. It aggregates
+temperature sources from your motherboard, CPU and GPU and lets you drive case, CPU and GPU fans
+from custom curves.
+
+### Features
+
+* **Custom fan curves** — linear, graph, target temperature, mix and trigger curves.
+* **Broad hardware support** — motherboards, NVIDIA and AMD graphics cards and dedicated sensors
+  (backend is based on [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)).
+* **Profiles** — save and switch configurations per use case (idle vs. gaming).
+* **Plugin system** — extend sensor and control support via community plugins.
+* **Lightweight** — very low CPU and memory footprint.
+
+### Notes
+
+* This package downloads the official installer from the vendor's GitHub release page.
+  The software is **not** redistributed by this package.
+* Fan Control is proprietary freeware, licensed for personal, non-commercial use.
+  See the [license](https://github.com/Rem0o/FanControl.Releases/blob/master/LICENSE).
+* Requires a 64-bit Windows 10 or 11 installation.
+* This package installs the .NET 10 build. Users who need the legacy .NET Framework 4.8 build
+  should install it manually from the release page.
+
+### Package Parameters
+
+None.
+]]></description>
+    <releaseNotes>https://github.com/Rem0o/FanControl.Releases/releases/tag/V271</releaseNotes>
+
+    <dependencies>
+      <dependency id="dotnet-10.0-desktopruntime" version="10.0.0" />
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
