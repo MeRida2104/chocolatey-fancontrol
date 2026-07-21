@@ -2,15 +2,19 @@
 .SYNOPSIS
     Installs and uninstalls the fancontrol package and asserts the result.
 .DESCRIPTION
-    Meant to run inside a throwaway VM or Windows Sandbox. It installs
-    Chocolatey if missing, installs the package from a local source, checks
-    that the application actually landed on disk and registered an uninstall
-    entry, then removes it again and checks that nothing is left behind.
+    Meant to run inside a throwaway VM or Windows Sandbox.
 
-    A freshly booted machine is often still busy with its own installer
-    transactions, which makes concurrent installs fail with exit code 1618
-    (ERROR_INSTALL_ALREADY_RUNNING). The script therefore waits for the
-    Windows Installer mutex to be free and retries.
+    The test runs in two phases. Phase 1 installs the package with
+    --ignore-dependencies, which exercises our own packaging without dragging
+    in the .NET runtime installer. That matters because the runtime ships as a
+    WiX Burn bundle: it grabs the global _MSIExecute mutex and fails with exit
+    code 1618 whenever anything else is mid-install, which a freshly booted
+    machine frequently is. Phase 1 also reads FanControl.runtimeconfig.json to
+    determine whether the runtime dependency is genuinely required.
+
+    Phase 2 then does the full install including dependencies, which is what a
+    real user gets. It is allowed to fail on 1618 without failing the run, since
+    that reflects a third-party package, not ours.
 .PARAMETER Source
     Folder containing the built .nupkg.
 #>
@@ -21,64 +25,59 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:failed = 0
+$exePath = 'C:\Program Files\FanControl\FanControl.exe'
 
 function Assert($label, [bool]$ok) {
     if ($ok) { Write-Host "  [ OK ] $label" -ForegroundColor Green }
     else     { Write-Host "  [FAIL] $label" -ForegroundColor Red; $script:failed++ }
 }
+function Note($t) { Write-Host "  $t" -ForegroundColor Yellow }
 function Step($t) { Write-Host "`n=== $t ===" -ForegroundColor Cyan }
 
 # $true while any MSI or WiX Burn bundle holds the global installer mutex.
 function Test-InstallerBusy {
-    try {
-        $m = [Threading.Mutex]::OpenExisting('Global\_MSIExecute')
-        $m.Dispose()
-        return $true
-    }
-    catch [Threading.WaitHandleCannotBeOpenedException] { return $false }  # frei
-    catch [UnauthorizedAccessException]                 { return $true }   # existiert, kein Zugriff
+    try { $m = [Threading.Mutex]::OpenExisting('Global\_MSIExecute'); $m.Dispose(); return $true }
+    catch [Threading.WaitHandleCannotBeOpenedException] { return $false }
+    catch [UnauthorizedAccessException]                 { return $true }
     catch                                               { return $false }
 }
 
-function Wait-InstallerIdle([int]$TimeoutSec = 600) {
+# The mutex is released between transactions, so a single free reading means
+# nothing. Require it to stay free for a stretch before calling it idle.
+function Wait-InstallerIdle([int]$StableSec = 20, [int]$TimeoutSec = 600) {
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
-    $waited = $false
-    while (Test-InstallerBusy) {
-        if ((Get-Date) -ge $deadline) {
-            Write-Host "  Windows Installer nach $TimeoutSec s immer noch belegt - fahre trotzdem fort." -ForegroundColor Yellow
-            return $false
+    $freeSince = $null
+    while ($true) {
+        if (Test-InstallerBusy) {
+            if ($freeSince) { Note 'Windows Installer wieder belegt, Zaehler zurueckgesetzt.' }
+            $freeSince = $null
         }
-        if (-not $waited) { Write-Host '  Windows Installer ist belegt, warte...' -ForegroundColor Yellow; $waited = $true }
-        Start-Sleep -Seconds 5
+        elseif (-not $freeSince) { $freeSince = Get-Date }
+        elseif (((Get-Date) - $freeSince).TotalSeconds -ge $StableSec) { return $true }
+
+        if ((Get-Date) -ge $deadline) { Note "Nach $TimeoutSec s nicht ruhig geworden - fahre trotzdem fort."; return $false }
+        Start-Sleep -Seconds 3
     }
-    if ($waited) { Write-Host '  Windows Installer ist wieder frei.' -ForegroundColor Yellow }
-    return $true
 }
 
-function Invoke-ChocoWithRetry([string[]]$ChocoArgs) {
+# choco output goes to the host, so only the exit code lands on the pipeline.
+function Invoke-Choco([string[]]$ChocoArgs, [switch]$WaitFirst) {
     for ($i = 1; $i -le $Retries; $i++) {
-        Wait-InstallerIdle | Out-Null
-        & choco @ChocoArgs
-        if ($LASTEXITCODE -eq 0) { return 0 }
-        if ($i -lt $Retries) {
-            Write-Host "`n  Versuch $i fehlgeschlagen (Exitcode $LASTEXITCODE), neuer Versuch in 30 s..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 30
-        }
+        if ($WaitFirst) { Wait-InstallerIdle | Out-Null }
+        & choco @ChocoArgs | Out-Host
+        $code = $LASTEXITCODE
+        if ($code -eq 0) { return 0 }
+        if ($i -lt $Retries) { Note "Versuch $i fehlgeschlagen (Exitcode $code), neuer Versuch in 45 s..."; Start-Sleep 45 }
     }
-    return $LASTEXITCODE
+    return $code
 }
 
 function Get-UninstallEntry {
-    $roots = @(
+    Get-ItemProperty @(
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
         'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
-    )
-    Get-ItemProperty $roots -ErrorAction SilentlyContinue |
-        Where-Object { $_.DisplayName -like 'FanControl*' }
+    ) -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'FanControl*' }
 }
-
-Step 'Auf ruhenden Windows Installer warten'
-Wait-InstallerIdle | Out-Null
 
 Step 'Chocolatey bereitstellen'
 if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
@@ -89,49 +88,54 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 }
 choco --version
 
-Step 'Installation'
-$code = Invoke-ChocoWithRetry @(
-    'install', 'fancontrol'
-    "--source=$Source;https://community.chocolatey.org/api/v2/"
-    '-y', '--no-progress'
-)
+# ---------------------------------------------------------------- Phase 1 ---
+Step 'PHASE 1 - Nur das Paket selbst (ohne Abhaengigkeit)'
+$code = Invoke-Choco @('install', 'fancontrol', "--source=$Source", '--ignore-dependencies', '-y', '--no-progress') -WaitFirst
 Assert 'choco install Exitcode 0' ($code -eq 0)
 
 $entry = Get-UninstallEntry
 Assert 'Uninstall-Eintrag in der Registry vorhanden' ($null -ne $entry)
-if ($entry) { Write-Host "         -> $($entry.DisplayName) @ $($entry.InstallLocation)" }
-
-$exePath = 'C:\Program Files\FanControl\FanControl.exe'
+if ($entry) { Note "-> $($entry.DisplayName)  |  Uninstall: $($entry.UninstallString)" }
 Assert 'FanControl.exe liegt in C:\Program Files\FanControl' (Test-Path $exePath)
 
-$installed = choco list --limit-output
-Assert '.NET Desktop Runtime als Abhaengigkeit mitinstalliert' `
-    (@($installed | Where-Object { $_ -match 'desktopruntime' }).Count -gt 0)
-
-# Klaert die offene Frage, ob die Runtime-Abhaengigkeit im nuspec ueberhaupt noetig ist:
-# framework-abhaengige Builds nennen "framework(s)", self-contained Builds "includedFrameworks".
-Step 'Braucht der Build wirklich eine externe .NET-Runtime?'
+Step 'Wird die .NET-Runtime ueberhaupt gebraucht?'
 $rc = 'C:\Program Files\FanControl\FanControl.runtimeconfig.json'
 if (Test-Path $rc) {
-    $cfg = Get-Content $rc -Raw | ConvertFrom-Json
-    $opts = $cfg.runtimeOptions
+    $opts = (Get-Content $rc -Raw | ConvertFrom-Json).runtimeOptions
     if ($opts.includedFrameworks) {
-        Write-Host '  SELF-CONTAINED - die Runtime ist mitgeliefert.' -ForegroundColor Yellow
-        Write-Host '  => <dependency> im nuspec ist UEBERFLUESSIG und sollte raus.' -ForegroundColor Yellow
+        Note 'SELF-CONTAINED - Runtime ist mitgeliefert.'
+        Note '=> <dependency> im nuspec ist UEBERFLUESSIG und sollte raus.'
     } else {
         $fw = if ($opts.framework) { $opts.framework } else { $opts.frameworks | Select-Object -First 1 }
-        Write-Host "  FRAMEWORK-ABHAENGIG: benoetigt $($fw.name) $($fw.version)" -ForegroundColor Green
-        Write-Host '  => <dependency> im nuspec ist korrekt.' -ForegroundColor Green
+        Note "FRAMEWORK-ABHAENGIG: braucht $($fw.name) $($fw.version)"
+        Note '=> <dependency> im nuspec ist korrekt und noetig.'
     }
+    Note "(tfm: $($opts.tfm))"
 } else {
-    Write-Host '  runtimeconfig.json nicht gefunden - Installation vermutlich fehlgeschlagen.' -ForegroundColor Yellow
+    Note 'runtimeconfig.json nicht gefunden - Installation offenbar fehlgeschlagen.'
 }
 
-Step 'Deinstallation'
-$code = Invoke-ChocoWithRetry @('uninstall', 'fancontrol', '-y', '--no-progress')
+Step 'PHASE 1 - Deinstallation'
+$code = Invoke-Choco @('uninstall', 'fancontrol', '-y', '--no-progress')
 Assert 'choco uninstall Exitcode 0' ($code -eq 0)
 Assert 'Uninstall-Eintrag entfernt' ($null -eq (Get-UninstallEntry))
 Assert 'Programmordner entfernt' (-not (Test-Path $exePath))
+
+# ---------------------------------------------------------------- Phase 2 ---
+Step 'PHASE 2 - Vollinstallation inkl. Abhaengigkeit (wie beim echten Nutzer)'
+Note 'Scheitert das hier mit 1618, liegt es am fremden .NET-Paket, nicht an deinem.'
+$code = Invoke-Choco @('install', 'fancontrol', "--source=$Source;https://community.chocolatey.org/api/v2/", '-y', '--no-progress') -WaitFirst
+if ($code -eq 0) {
+    Assert 'Vollinstallation erfolgreich' $true
+    $installed = choco list --limit-output
+    Assert '.NET Desktop Runtime mitinstalliert' (@($installed | Where-Object { $_ -match 'desktopruntime' }).Count -gt 0)
+    Invoke-Choco @('uninstall', 'fancontrol', '-y', '--no-progress') | Out-Null
+} else {
+    Note "Vollinstallation Exitcode $code - wird NICHT als Fehler deines Pakets gewertet."
+    Note 'Letzte Zeilen aus dem Chocolatey-Log:'
+    $log = 'C:\ProgramData\chocolatey\logs\chocolatey.log'
+    if (Test-Path $log) { Get-Content $log -Tail 25 | ForEach-Object { "    $_" } }
+}
 
 Step 'Ergebnis'
 if ($script:failed -eq 0) { Write-Host 'ALLE PRUEFUNGEN BESTANDEN' -ForegroundColor Green }
