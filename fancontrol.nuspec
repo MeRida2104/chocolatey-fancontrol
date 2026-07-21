@@ -11,8 +11,7 @@
     <title>FanControl</title>
     <authors>Rémi Mercier (Rem0o)</authors>
     <projectUrl>https://getfancontrol.com/</projectUrl>
-    <!-- TODO: Icon im eigenen Packaging-Repo ablegen und per jsDelivr auf einen Commit-SHA pinnen -->
-    <iconUrl>https://cdn.jsdelivr.net/gh/YOUR_GITHUB_USER/chocolatey-packages@COMMIT_SHA/icons/fancontrol.png</iconUrl>
+    <iconUrl>https://cdn.jsdelivr.net/gh/MeRida2104/chocolatey-fancontrol@e8364aeb5f8f76b3f665d61cdcc9bee11fcf4291/icons/fancontrol.png</iconUrl>
     <licenseUrl>https://github.com/Rem0o/FanControl.Releases/blob/master/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
 

@@ -4,3 +4,6 @@
 # Downloaded installers must never be committed (no redistribution rights)
 *.exe
 *.zip
+
+# Local tooling
+.claude/
