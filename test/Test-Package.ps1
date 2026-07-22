@@ -4,19 +4,21 @@
 .DESCRIPTION
     Meant to run inside a throwaway VM or Windows Sandbox.
 
-    The test runs in two phases. Phase 1 installs the package with
-    --ignore-dependencies, which exercises our own packaging without dragging
-    in the .NET runtime installer. That matters because the runtime ships as a
-    WiX Burn bundle: it grabs the global _MSIExecute mutex and fails with exit
-    code 1618 whenever anything else is mid-install, which a freshly booted
-    machine frequently is. Phase 1 also reads FanControl.runtimeconfig.json to
-    determine whether the runtime dependency is genuinely required.
+    Phase 1 installs with --ignore-dependencies. That exercises our own
+    packaging in isolation, without pulling in the .NET runtime bundle, which
+    is a WiX Burn package: it takes the global _MSIExecute mutex and fails with
+    exit code 1618 whenever another install is in flight, which a freshly
+    booted machine frequently has. Phase 1 also asserts that the shipped build
+    is still framework-dependent, so that if upstream ever switches to a
+    self-contained build the test tells you to drop the runtime dependency
+    from the nuspec instead of silently forcing a needless 57 MB download on
+    every user.
 
-    Phase 2 then does the full install including dependencies, which is what a
-    real user gets. It is allowed to fail on 1618 without failing the run, since
-    that reflects a third-party package, not ours.
+    Phase 2 performs the full install including dependencies, which is what a
+    real user gets. Since the runtime dependency is required, failures here
+    count as failures.
 .PARAMETER Source
-    Folder containing the built .nupkg.
+    Folder containing the built .nupkg and the nuspec.
 #>
 param(
     [string]$Source = 'C:\pkg',
@@ -25,7 +27,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:failed = 0
-$exePath = 'C:\Program Files\FanControl\FanControl.exe'
+$installDir = 'C:\Program Files\FanControl'
+$exePath    = Join-Path $installDir 'FanControl.exe'
+$rcPath     = Join-Path $installDir 'FanControl.runtimeconfig.json'
 
 function Assert($label, [bool]$ok) {
     if ($ok) { Write-Host "  [ OK ] $label" -ForegroundColor Green }
@@ -42,7 +46,7 @@ function Test-InstallerBusy {
     catch                                               { return $false }
 }
 
-# The mutex is released between transactions, so a single free reading means
+# The mutex is released between transactions, so a single free reading proves
 # nothing. Require it to stay free for a stretch before calling it idle.
 function Wait-InstallerIdle([int]$StableSec = 20, [int]$TimeoutSec = 600) {
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
@@ -79,6 +83,11 @@ function Get-UninstallEntry {
     ) -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like 'FanControl*' }
 }
 
+function Show-ChocoLogTail {
+    $log = 'C:\ProgramData\chocolatey\logs\chocolatey.log'
+    if (Test-Path $log) { Note 'Letzte Zeilen aus chocolatey.log:'; Get-Content $log -Tail 25 | ForEach-Object { "    $_" } }
+}
+
 Step 'Chocolatey bereitstellen'
 if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
     Set-ExecutionPolicy Bypass -Scope Process -Force
@@ -89,30 +98,49 @@ if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
 choco --version
 
 # ---------------------------------------------------------------- Phase 1 ---
-Step 'PHASE 1 - Nur das Paket selbst (ohne Abhaengigkeit)'
+Step 'PHASE 1 - Paket isoliert, ohne Abhaengigkeit'
 $code = Invoke-Choco @('install', 'fancontrol', "--source=$Source", '--ignore-dependencies', '-y', '--no-progress') -WaitFirst
 Assert 'choco install Exitcode 0' ($code -eq 0)
+if ($code -ne 0) { Show-ChocoLogTail }
 
 $entry = Get-UninstallEntry
 Assert 'Uninstall-Eintrag in der Registry vorhanden' ($null -ne $entry)
-if ($entry) { Note "-> $($entry.DisplayName)  |  Uninstall: $($entry.UninstallString)" }
+if ($entry) { Note "-> $($entry.DisplayName)  |  $($entry.UninstallString)" }
 Assert 'FanControl.exe liegt in C:\Program Files\FanControl' (Test-Path $exePath)
 
-Step 'Wird die .NET-Runtime ueberhaupt gebraucht?'
-$rc = 'C:\Program Files\FanControl\FanControl.runtimeconfig.json'
-if (Test-Path $rc) {
-    $opts = (Get-Content $rc -Raw | ConvertFrom-Json).runtimeOptions
+Step 'Regressionswaechter: Runtime-Abhaengigkeit noch korrekt?'
+Assert 'FanControl.runtimeconfig.json vorhanden' (Test-Path $rcPath)
+if (Test-Path $rcPath) {
+    $opts = (Get-Content $rcPath -Raw | ConvertFrom-Json).runtimeOptions
+    Note "tfm: $($opts.tfm)"
+
+    # Self-contained Builds fuehren "includedFrameworks", framework-abhaengige "framework(s)".
+    Assert 'Build ist framework-abhaengig (nicht self-contained)' ($null -eq $opts.includedFrameworks)
     if ($opts.includedFrameworks) {
-        Note 'SELF-CONTAINED - Runtime ist mitgeliefert.'
-        Note '=> <dependency> im nuspec ist UEBERFLUESSIG und sollte raus.'
-    } else {
-        $fw = if ($opts.framework) { $opts.framework } else { $opts.frameworks | Select-Object -First 1 }
-        Note "FRAMEWORK-ABHAENGIG: braucht $($fw.name) $($fw.version)"
-        Note '=> <dependency> im nuspec ist korrekt und noetig.'
+        Note 'ACHTUNG: Upstream liefert die Runtime jetzt mit.'
+        Note '=> <dependency> aus fancontrol.nuspec ENTFERNEN, sonst zwingst du Nutzern 57 MB .NET auf.'
     }
-    Note "(tfm: $($opts.tfm))"
-} else {
-    Note 'runtimeconfig.json nicht gefunden - Installation offenbar fehlgeschlagen.'
+
+    $fw = if ($opts.framework) { $opts.framework } else { $opts.frameworks | Select-Object -First 1 }
+    if ($fw) {
+        Note "benoetigt: $($fw.name) $($fw.version)"
+        Assert 'Benoetigtes Framework ist Microsoft.WindowsDesktop.App' ($fw.name -eq 'Microsoft.WindowsDesktop.App')
+
+        # Gegenprobe: deckt die im nuspec deklarierte Abhaengigkeit diese Runtime ab?
+        $nuspec = Join-Path $Source 'fancontrol.nuspec'
+        if (Test-Path $nuspec) {
+            $dep = ([xml](Get-Content $nuspec -Raw)).package.metadata.dependencies.dependency |
+                   Where-Object { $_.id -match 'desktopruntime' }
+            if ($dep) {
+                Note "nuspec deklariert: $($dep.id) $($dep.version)"
+                $needMajor = ([version]$fw.version).Major
+                $depMajor  = if ($dep.id -match 'dotnet-(\d+)\.') { [int]$Matches[1] } else { -1 }
+                Assert "nuspec-Abhaengigkeit passt zur benoetigten Runtime (major $needMajor)" ($depMajor -eq $needMajor)
+            } else {
+                Assert 'nuspec deklariert eine desktopruntime-Abhaengigkeit' $false
+            }
+        } else { Note "nuspec unter $nuspec nicht gefunden - Gegenprobe uebersprungen." }
+    }
 }
 
 Step 'PHASE 1 - Deinstallation'
@@ -122,20 +150,23 @@ Assert 'Uninstall-Eintrag entfernt' ($null -eq (Get-UninstallEntry))
 Assert 'Programmordner entfernt' (-not (Test-Path $exePath))
 
 # ---------------------------------------------------------------- Phase 2 ---
-Step 'PHASE 2 - Vollinstallation inkl. Abhaengigkeit (wie beim echten Nutzer)'
-Note 'Scheitert das hier mit 1618, liegt es am fremden .NET-Paket, nicht an deinem.'
+Step 'PHASE 2 - Vollinstallation inkl. .NET-Runtime (wie beim echten Nutzer)'
 $code = Invoke-Choco @('install', 'fancontrol', "--source=$Source;https://community.chocolatey.org/api/v2/", '-y', '--no-progress') -WaitFirst
-if ($code -eq 0) {
-    Assert 'Vollinstallation erfolgreich' $true
-    $installed = choco list --limit-output
-    Assert '.NET Desktop Runtime mitinstalliert' (@($installed | Where-Object { $_ -match 'desktopruntime' }).Count -gt 0)
-    Invoke-Choco @('uninstall', 'fancontrol', '-y', '--no-progress') | Out-Null
-} else {
-    Note "Vollinstallation Exitcode $code - wird NICHT als Fehler deines Pakets gewertet."
-    Note 'Letzte Zeilen aus dem Chocolatey-Log:'
-    $log = 'C:\ProgramData\chocolatey\logs\chocolatey.log'
-    if (Test-Path $log) { Get-Content $log -Tail 25 | ForEach-Object { "    $_" } }
+Assert 'choco install (mit Abhaengigkeit) Exitcode 0' ($code -eq 0)
+if ($code -ne 0) {
+    Show-ChocoLogTail
+    if ($code -eq 1618) { Note 'Exitcode 1618 = ein anderer Installer war aktiv. Sandbox neu starten und erneut testen.' }
 }
+
+$installed = choco list --limit-output
+Assert '.NET Desktop Runtime mitinstalliert' (@($installed | Where-Object { $_ -match 'desktopruntime' }).Count -gt 0)
+Assert 'FanControl.exe nach Vollinstallation vorhanden' (Test-Path $exePath)
+
+Step 'PHASE 2 - Deinstallation'
+$code = Invoke-Choco @('uninstall', 'fancontrol', '-y', '--no-progress')
+Assert 'choco uninstall Exitcode 0' ($code -eq 0)
+Assert 'Uninstall-Eintrag entfernt' ($null -eq (Get-UninstallEntry))
+Assert 'Programmordner entfernt' (-not (Test-Path $exePath))
 
 Step 'Ergebnis'
 if ($script:failed -eq 0) { Write-Host 'ALLE PRUEFUNGEN BESTANDEN' -ForegroundColor Green }
