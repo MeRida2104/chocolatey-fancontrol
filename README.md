@@ -19,22 +19,88 @@ time and verifies its SHA256 checksum.
 | `tools/chocolateyinstall.ps1` | Downloads and silently runs the official installer |
 | `tools/chocolateybeforemodify.ps1` | Stops a running Fan Control before upgrade/uninstall |
 | `icons/fancontrol.png` | Icon referenced by `iconUrl` via jsDelivr |
+| `test/New-SandboxConfig.ps1` | Generates a Windows Sandbox config for this checkout |
+| `test/Test-Package.ps1` | The actual install/uninstall test |
+| `test/Run-Test.cmd` | Wrapper so the ExecutionPolicy never gets in the way |
 
 ## Building
 
 ```powershell
 choco pack
-choco install fancontrol -s . -y   # test in a VM
-choco uninstall fancontrol -y
+```
+
+## Testing
+
+Never test this on your working machine: the package installs a driver-touching
+hardware utility and the point of the exercise is to watch it install and uninstall
+cleanly. **Windows Sandbox** is the cheapest way to get a throwaway machine — it needs
+no product key or ISO, since Windows Pro, Enterprise and Education include the
+entitlement, and it resets completely every time you close it.
+
+Enable it once, from an elevated PowerShell, then reboot:
+
+```powershell
+Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All
+```
+
+Then build the package, generate a sandbox config for your checkout and launch it:
+
+```powershell
+choco pack
+.\test\New-SandboxConfig.ps1 -Start
+```
+
+The sandbox mounts the repository read-only at `C:\pkg` and runs the test on logon.
+`New-SandboxConfig.ps1` exists because Windows Sandbox does not support relative paths
+in `<MappedFolders>`, so the config has to be written for wherever the repository sits.
+The generated `.wsb` is git-ignored.
+
+### What the test asserts
+
+**Phase 1** installs with `--ignore-dependencies`, exercising this package alone:
+
+- `choco install` succeeds and Fan Control lands in `C:\Program Files\FanControl`
+- An uninstall entry is registered, so Chocolatey's auto-uninstaller has something to work with
+- The shipped build is still framework-dependent and still asks for
+  `Microsoft.WindowsDesktop.App` — if upstream ever switches to a self-contained build,
+  this fails and tells you to drop the runtime dependency from the nuspec
+- The major version that `FanControl.runtimeconfig.json` demands matches the
+  `dotnet-<major>.0-desktopruntime` dependency declared in the nuspec
+- Uninstalling leaves neither the registry entry nor the program folder behind
+
+**Phase 2** repeats the install with dependencies, which is what a real user gets.
+
+### Known snag: exit code 1618
+
+The .NET Desktop Runtime ships as a WiX Burn bundle and takes the global
+`_MSIExecute` mutex. A freshly booted machine is often still finishing its own
+installer transactions, and the runtime then fails with `1618`
+(`ERROR_INSTALL_ALREADY_RUNNING`). The test waits for that mutex to stay free for a
+stretch and retries, but if it persists, restart the sandbox and run it again.
+
+Two things inside the sandbox are expected and not worth chasing: Windows reports
+itself as **not activated** (the sandbox image is a volume-license SKU with no
+activation path), and Fan Control itself will not find any fans, because there is no
+real sensor hardware. Neither affects what is being tested here.
+
+## Publishing
+
+```powershell
 choco push fancontrol.<version>.nupkg -s https://push.chocolatey.org/
 ```
+
+While a version is still in moderation it can be fixed and pushed again under the
+same version number — it moves to "Updated" at the top of the queue rather than
+losing its place.
 
 ## Updating to a new upstream release
 
 1. Look up the new release at <https://github.com/Rem0o/FanControl.Releases/releases>.
 2. Bump `<version>` in the nuspec (upstream `V271` becomes `271.0.0`).
 3. Update the URL, the SHA256 checksum and `<releaseNotes>`.
-4. Verify that the required .NET runtime dependency still matches the build.
+4. Run the test. It verifies that the declared .NET runtime dependency still matches
+   what the new build actually requires, so this is not something you have to
+   remember to check by hand.
 
 ## Vendor permission
 
