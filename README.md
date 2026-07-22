@@ -36,8 +36,21 @@ choco push fancontrol.<version>.nupkg -s https://push.chocolatey.org/
 3. Update the URL, the SHA256 checksum and `<releaseNotes>`.
 4. Verify that the required .NET runtime dependency still matches the build.
 
+## Vendor permission
+
+Fan Control's [license](https://github.com/Rem0o/FanControl.Releases/blob/master/LICENSE)
+does not grant redistribution rights, so permission was requested before publishing.
+Rémi Mercier (Rem0o), the author and rights holder, granted it in
+[FanControl.Releases#4105](https://github.com/Rem0o/FanControl.Releases/issues/4105#issuecomment-5036906935)
+on 2026-07-21: "Fine by me. […] Go ahead."
+
+Note that this package redistributes nothing regardless — it downloads the official,
+Authenticode-signed installer straight from the vendor's GitHub release and verifies
+its SHA256 checksum before running it.
+
 ## License
 
 The packaging scripts in this repository are provided as-is. Fan Control itself is
-licensed by its author; see the [upstream license](https://github.com/Rem0o/FanControl.Releases/blob/master/LICENSE).
-This repository is not affiliated with or endorsed by Rémi Mercier.
+proprietary freeware licensed by its author for personal, non-commercial use; see the
+[upstream license](https://github.com/Rem0o/FanControl.Releases/blob/master/LICENSE).
+This repository is maintained independently and is not an official distribution channel.
