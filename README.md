@@ -25,9 +25,22 @@ time and verifies its SHA256 checksum.
 
 ## Building
 
+The whole cycle at a glance:
+
 ```powershell
-choco pack
+choco pack                                                              # -> fancontrol.<version>.nupkg
+choco install fancontrol -s . -y                                        # VM only, never your workstation
+choco uninstall fancontrol -y
+choco push fancontrol.<version>.nupkg -s https://push.chocolatey.org/
 ```
+
+`choco pack` reads `fancontrol.nuspec` and packs `tools\**` into the nupkg. It stays
+tiny (a few kB) because no binaries are embedded — if it ever comes out at tens of
+megabytes, something is being bundled that must not be.
+
+The install and uninstall lines above are the crude version. Use the sandbox described
+below instead: it asserts the outcome rather than leaving you to eyeball it, and it
+cannot wreck the machine you are working on.
 
 ## Testing
 
@@ -95,12 +108,57 @@ losing its place.
 
 ## Updating to a new upstream release
 
-1. Look up the new release at <https://github.com/Rem0o/FanControl.Releases/releases>.
-2. Bump `<version>` in the nuspec (upstream `V271` becomes `271.0.0`).
-3. Update the URL, the SHA256 checksum and `<releaseNotes>`.
-4. Run the test. It verifies that the declared .NET runtime dependency still matches
-   what the new build actually requires, so this is not something you have to
-   remember to check by hand.
+Upstream tags releases as `V271`, `V272` and so on. Chocolatey needs three-part
+versions, so `V271` becomes `271.0.0`.
+
+**1. Find the release and its assets.**
+
+```powershell
+$r = Invoke-RestMethod https://api.github.com/repos/Rem0o/FanControl.Releases/releases/latest
+$r.tag_name
+$r.assets | Select-Object name, size, browser_download_url
+```
+
+This package tracks the `net_10_0` **installer** asset, not the portable zip.
+
+**2. Work out the new checksum.** Chocolatey requires one for every download, and it
+has to be computed from the file itself:
+
+```powershell
+$v   = '272'                                          # new upstream version
+$url = "https://github.com/Rem0o/FanControl.Releases/releases/download/V$v/FanControl_${v}_net_10_0_Installer.exe"
+$tmp = "$env:TEMP\fancontrol-installer.exe"
+Invoke-WebRequest $url -OutFile $tmp -UseBasicParsing
+(Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
+Get-AuthenticodeSignature $tmp | Select-Object Status, @{n='Signer';e={$_.SignerCertificate.Subject}}
+```
+
+The signature check is worth the extra line — releases are signed by
+`CN=Rémi Mercier`, and a broken or missing signature means the download is not what it
+should be.
+
+**3. Edit the two files.**
+
+| File | Change |
+| --- | --- |
+| `fancontrol.nuspec` | `<version>`, `<releaseNotes>` |
+| `tools/chocolateyinstall.ps1` | `url64bit`, `checksum64` |
+
+**4. Check the silent arguments still apply.** They are Inno Setup switches. If a
+release ever ships a different installer technology, `/VERYSILENT` stops working and
+the install will hang instead of failing loudly:
+
+```powershell
+$bytes = [IO.File]::ReadAllBytes($tmp)
+if ([Text.Encoding]::ASCII.GetString($bytes) -match 'Inno Setup Setup Data \(([\d\.a-z]+)\)') { $Matches[0] }
+```
+
+**5. Pack and test**, per the sections above. The test verifies on its own that the
+declared .NET runtime dependency still matches what the new build actually requires,
+so that is not something you have to remember to check by hand.
+
+**6. Push.** Do not reuse a version number that has already been approved; bump it.
+Versions still sitting in moderation are the exception and may be replaced in place.
 
 ## Vendor permission
 
