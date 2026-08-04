@@ -157,7 +157,15 @@ if ([Text.Encoding]::ASCII.GetString($bytes) -match 'Inno Setup Setup Data \(([\
 
 ```powershell
 choco pack
-.\test\New-SandboxConfig.ps1 -Start
+```
+
+1. **Boot the Virtual Machine**
+Start the **Windows 11** VirtualBox VM.
+2. **Run the Script**
+Open PowerShell inside the virtual machine and execute the following command:
+```powershell
+powershell -ExecutionPolicy Bypass -File \\VBOXSVR\fancontrol\test\Test-Package.ps1 -Source \\VBOXSVR\fancontrol
+
 ```
 
 Wait for both phases to come back green in the sandbox. The test verifies on its own
