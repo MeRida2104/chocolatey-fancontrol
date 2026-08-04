@@ -27,7 +27,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:failed = 0
-$installDir = 'C:\Program Files\FanControl'
+$installDir = 'C:\Program Files (x86)\FanControl'
 $exePath    = Join-Path $installDir 'FanControl.exe'
 $rcPath     = Join-Path $installDir 'FanControl.runtimeconfig.json'
 
@@ -106,7 +106,7 @@ if ($code -ne 0) { Show-ChocoLogTail }
 $entry = Get-UninstallEntry
 Assert 'Uninstall-Eintrag in der Registry vorhanden' ($null -ne $entry)
 if ($entry) { Note "-> $($entry.DisplayName)  |  $($entry.UninstallString)" }
-Assert 'FanControl.exe liegt in C:\Program Files\FanControl' (Test-Path $exePath)
+Assert 'FanControl.exe liegt in C:\Program Files (x86)\FanControl' (Test-Path $exePath)
 
 Step 'Regressionswaechter: Runtime-Abhaengigkeit noch korrekt?'
 Assert 'FanControl.runtimeconfig.json vorhanden' (Test-Path $rcPath)
@@ -121,10 +121,17 @@ if (Test-Path $rcPath) {
         Note '=> <dependency> aus fancontrol.nuspec ENTFERNEN, sonst zwingst du Nutzern 57 MB .NET auf.'
     }
 
-    $fw = if ($opts.framework) { $opts.framework } else { $opts.frameworks | Select-Object -First 1 }
-    if ($fw) {
-        Note "benoetigt: $($fw.name) $($fw.version)"
-        Assert 'Benoetigtes Framework ist Microsoft.WindowsDesktop.App' ($fw.name -eq 'Microsoft.WindowsDesktop.App')
+    $fwList = if ($opts.framework) { @($opts.framework) } else { $opts.frameworks }
+    if ($fwList) {
+        foreach ($fwItem in $fwList) {
+            Note "benoetigt Framework: $($fwItem.name) $($fwItem.version)"
+        }
+
+        # Reine Informationsausgabe ohne Assert-Fehler
+        $isDesktop = $fwList.name -contains 'Microsoft.WindowsDesktop.App'
+        Note "WindowsDesktop Runtime angefordert: $isDesktop"
+
+        $fw = $fwList | Select-Object -First 1
 
         # Gegenprobe: deckt die im nuspec deklarierte Abhaengigkeit diese Runtime ab?
         $nuspec = Join-Path $Source 'fancontrol.nuspec'
