@@ -153,12 +153,25 @@ $bytes = [IO.File]::ReadAllBytes($tmp)
 if ([Text.Encoding]::ASCII.GetString($bytes) -match 'Inno Setup Setup Data \(([\d\.a-z]+)\)') { $Matches[0] }
 ```
 
-**5. Pack and test**, per the sections above. The test verifies on its own that the
-declared .NET runtime dependency still matches what the new build actually requires,
-so that is not something you have to remember to check by hand.
+**5. Pack and test.**
 
-**6. Push.** Do not reuse a version number that has already been approved; bump it.
-Versions still sitting in moderation are the exception and may be replaced in place.
+```powershell
+choco pack
+.\test\New-SandboxConfig.ps1 -Start
+```
+
+Wait for both phases to come back green in the sandbox. The test verifies on its own
+that the declared .NET runtime dependency still matches what the new build actually
+requires, so that is not something you have to remember to check by hand.
+
+**6. Push.**
+
+```powershell
+choco push fancontrol.<version>.nupkg -s https://push.chocolatey.org/
+```
+
+Do not reuse a version number that has already been approved; bump it. Versions still
+sitting in moderation are the exception and may be replaced in place.
 
 ## Vendor permission
 
