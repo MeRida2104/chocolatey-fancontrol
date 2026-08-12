@@ -16,6 +16,7 @@ time and verifies its SHA256 checksum.
 | Path | Purpose |
 | --- | --- |
 | `fancontrol.nuspec` | Package metadata |
+| `update.ps1` | AU (Chocolatey-AU) script that checks for a new upstream release and updates the checksum/URL/version automatically |
 | `tools/chocolateyinstall.ps1` | Downloads and silently runs the official installer |
 | `tools/chocolateybeforemodify.ps1` | Stops a running Fan Control before upgrade/uninstall |
 | `icons/fancontrol.png` | Icon referenced by `iconUrl` via jsDelivr |
@@ -110,6 +111,35 @@ losing its place.
 
 Upstream tags releases as `V271`, `V272` and so on. Chocolatey needs three-part
 versions, so `V271` becomes `271.0.0`.
+
+### Automated (recommended)
+
+Requires the [Chocolatey-AU](https://community.chocolatey.org/packages/chocolatey-au)
+module:
+
+```powershell
+choco install chocolatey-au
+```
+
+Then, from the repo root:
+
+```powershell
+.\update.ps1
+```
+
+This checks the latest GitHub release via the API, and — if it's newer than the
+version currently in `fancontrol.nuspec` — downloads the `net_10_0` installer asset,
+computes its SHA256, and updates `url64bit`/`checksum64` in
+`tools/chocolateyinstall.ps1` as well as `<version>`/`<releaseNotes>` in the nuspec.
+It also packs the `.nupkg`. It does **not** check the Authenticode signature, verify
+the silent-install switches, run the sandbox test, or push — continue at step 4 below
+for those. If nothing changed, it just reports `No new version found` and exits.
+
+This covers steps 1–3 below automatically. The manual steps stay documented here as a
+fallback (e.g. if the upstream asset naming ever changes and the script's regex needs
+adjusting) and to explain what the script is actually doing under the hood.
+
+### Manual walkthrough
 
 **1. Find the release and its assets.**
 
