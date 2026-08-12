@@ -3,7 +3,7 @@
   <metadata>
     <!-- == PACKAGE SPECIFIC SECTION == -->
     <id>fancontrol</id>
-    <version>272.0.0</version>
+    <version>273.0.0</version>
     <owners>MeRida1</owners>
     <packageSourceUrl>https://github.com/MeRida2104/chocolatey-fancontrol</packageSourceUrl>
 
@@ -49,7 +49,7 @@ from custom curves.
 
 None.
 ]]></description>
-    <releaseNotes>https://github.com/Rem0o/FanControl.Releases/releases/tag/V272</releaseNotes>
+    <releaseNotes>https://github.com/Rem0o/FanControl.Releases/releases/tag/V273</releaseNotes>
 
     <dependencies>
       <dependency id="dotnet-10.0-desktopruntime" version="10.0.0" />
