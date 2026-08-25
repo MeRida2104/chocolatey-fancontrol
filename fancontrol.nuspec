@@ -3,7 +3,7 @@
   <metadata>
     <!-- == PACKAGE SPECIFIC SECTION == -->
     <id>fancontrol</id>
-    <version>274.0.0</version>
+    <version>275.0.0</version>
     <owners>MeRida1</owners>
     <packageSourceUrl>https://github.com/MeRida2104/chocolatey-fancontrol</packageSourceUrl>
 
