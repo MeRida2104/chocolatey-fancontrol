@@ -61,6 +61,11 @@ function global:au_SearchReplace {
             "(?m)(?<=^\s{0,10}url64bit\s{0,10}=\s{0,10}')[^']+"   = "$($Latest.URL64)"
             "(?m)(?<=^\s{0,10}checksum64\s{0,10}=\s{0,10}')[^']*" = "$($Latest.Checksum64)"
         }
+        # AU aktualisiert in der nuspec von sich aus nur <version>; <releaseNotes>
+        # muss hier explizit mitgezogen werden.
+        ".\fancontrol.nuspec"           = @{
+            "(?<=\<releaseNotes\>)[^<]*(?=\</releaseNotes\>)" = "$($Latest.ReleaseNotes)"
+        }
     }
 }
 

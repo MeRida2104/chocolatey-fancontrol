@@ -49,7 +49,7 @@ from custom curves.
 
 None.
 ]]></description>
-    <releaseNotes>https://github.com/Rem0o/FanControl.Releases/releases/tag/V274</releaseNotes>
+    <releaseNotes>https://github.com/Rem0o/FanControl.Releases/releases/tag/V276</releaseNotes>
 
     <dependencies>
       <dependency id="dotnet-10.0-desktopruntime" version="10.0.0" />
