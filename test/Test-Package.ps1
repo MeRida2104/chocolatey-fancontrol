@@ -169,11 +169,38 @@ $installed = choco list --limit-output
 Assert '.NET Desktop Runtime mitinstalliert' (@($installed | Where-Object { $_ -match 'desktopruntime' }).Count -gt 0)
 Assert 'FanControl.exe nach Vollinstallation vorhanden' (Test-Path $exePath)
 
+Step 'PHASE 2 - Upgrade bei laufendem FanControl'
+# Ein erzwungenes Reinstall durchlaeuft wie ein Upgrade chocolateybeforemodify.ps1,
+# das FanControl beendet. Danach muss es wieder laufen, sonst bleiben die Luefter
+# bis zur naechsten Anmeldung ungesteuert.
+if (Test-Path $exePath) {
+    Start-Process -FilePath $exePath -WorkingDirectory $installDir
+    for ($i = 0; $i -lt 15 -and -not (Get-Process FanControl -ErrorAction SilentlyContinue); $i++) { Start-Sleep 1 }
+    $before = Get-Process FanControl -ErrorAction SilentlyContinue
+    Assert 'FanControl laeuft vor dem Upgrade' ($null -ne $before)
+
+    $code = Invoke-Choco @('install', 'fancontrol', "--source=$Source", '--force', '--ignore-dependencies', '-y', '--no-progress') -WaitFirst
+    Assert 'choco install --force Exitcode 0' ($code -eq 0)
+
+    for ($i = 0; $i -lt 15 -and -not (Get-Process FanControl -ErrorAction SilentlyContinue); $i++) { Start-Sleep 1 }
+    $after = Get-Process FanControl -ErrorAction SilentlyContinue
+    Assert 'FanControl laeuft nach dem Upgrade wieder' ($null -ne $after)
+    if ($before -and $after) { Assert 'FanControl wurde tatsaechlich neu gestartet (neue PID)' (@($after.Id) -notcontains $before[0].Id) }
+}
+
 Step 'PHASE 2 - Deinstallation'
+# FanControl legt seine Autostart-Aufgabe erst an, wenn man "Start with Windows"
+# einschaltet. Hier nachgebaut, damit geprueft werden kann, dass sie mit verschwindet.
+$action  = New-ScheduledTaskAction -Execute 'FanControl' -WorkingDirectory "$installDir\"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName 'FanControl' -TaskPath '\' -Action $action -Trigger $trigger -Force | Out-Null
+Assert 'Autostart-Aufgabe vor der Deinstallation angelegt' ($null -ne (Get-ScheduledTask -TaskName 'FanControl' -ErrorAction SilentlyContinue))
+
 $code = Invoke-Choco @('uninstall', 'fancontrol', '-y', '--no-progress')
 Assert 'choco uninstall Exitcode 0' ($code -eq 0)
 Assert 'Uninstall-Eintrag entfernt' ($null -eq (Get-UninstallEntry))
 Assert 'Programmordner entfernt' (-not (Test-Path $exePath))
+Assert 'Autostart-Aufgabe entfernt' ($null -eq (Get-ScheduledTask -TaskName 'FanControl' -ErrorAction SilentlyContinue))
 
 Step 'Ergebnis'
 if ($script:failed -eq 0) { Write-Host 'ALLE PRUEFUNGEN BESTANDEN' -ForegroundColor Green }
