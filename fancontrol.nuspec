@@ -3,7 +3,7 @@
   <metadata>
     <!-- == PACKAGE SPECIFIC SECTION == -->
     <id>fancontrol</id>
-    <version>277.0.0.20260914</version>
+    <version>278.0.0</version>
     <owners>MeRida1</owners>
     <packageSourceUrl>https://github.com/MeRida2104/chocolatey-fancontrol</packageSourceUrl>
 
@@ -49,7 +49,7 @@ from custom curves.
 
 None.
 ]]></description>
-    <releaseNotes>https://github.com/Rem0o/FanControl.Releases/releases/tag/V277</releaseNotes>
+    <releaseNotes>Software: https://github.com/Rem0o/FanControl.Releases/releases/tag/V278 | Package: FanControl is now restarted after an upgrade if it was running before (upgrades from package versions older than 277.0.0.20260914 still leave it stopped this one time). choco uninstall now reliably removes FanControl; if you uninstalled this package before, FanControl may still be installed.</releaseNotes>
 
     <dependencies>
       <dependency id="dotnet-10.0-desktopruntime" version="10.0.0" />
