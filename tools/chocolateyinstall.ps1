@@ -7,8 +7,8 @@ if (-not (Get-OSArchitectureWidth 64) -or $env:chocolateyForceX86 -eq 'true') {
 $packageArgs = @{
   packageName    = $env:ChocolateyPackageName
   fileType       = 'exe'
-  url64bit       = 'https://github.com/Rem0o/FanControl.Releases/releases/download/V278/FanControl_278_net_10_0_Installer.exe'
-  checksum64     = '491eaece2a4c0d630ff667c3bb82f7e7e4041eb272cfd0d5bf3af4f9e5b9f272'
+  url64bit       = 'https://github.com/Rem0o/FanControl.Releases/releases/download/V279/FanControl_279_net_10_0_Installer.exe'
+  checksum64     = 'e80872a5c7d6f5aae13bfc5b50abf0b57c88b658fabe640d16f3ff415499d7c3'
   checksumType64 = 'sha256'
 
   softwareName   = 'FanControl*'
