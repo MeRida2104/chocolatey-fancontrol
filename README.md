@@ -109,8 +109,10 @@ losing its place.
 
 ## Automatic updates (GitHub Actions)
 
-`.github/workflows/update.yml` runs daily on a Windows runner (and on demand via
-*Actions → Update package → Run workflow*). When upstream has a new release it:
+`.github/workflows/update.yml` checks hourly (and on demand via
+*Actions → Update package → Run workflow*). A short Linux job compares the latest
+upstream tag with the nuspec version; only when they differ does the Windows job start.
+It then:
 
 1. runs `update.ps1` (new URL, checksum, version, release notes, `choco pack`),
 2. checks checksum, Authenticode signature (`CN=Rémi Mercier`) and that the installer is still Inno Setup,

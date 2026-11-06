@@ -1,14 +1,16 @@
 name: Update package
 
-# Checks daily for a new FanControl release. If there is one, it updates the
-# package (update.ps1 / Chocolatey-AU), verifies the installer, pushes to the
-# Chocolatey community repository and commits the change back to main.
+# Checks hourly for a new FanControl release. A quick Linux job compares the
+# latest upstream tag with the nuspec version; only if they differ does the
+# Windows job start, which updates the package (update.ps1 / Chocolatey-AU),
+# verifies the installer, pushes to the Chocolatey community repository and
+# commits the change back to main. Manual runs always go to the Windows job.
 #
 # Requires the repository secret CHOCO_API_KEY.
 
 on:
   schedule:
-    - cron: '23 5 * * *'   # daily, 05:23 UTC
+    - cron: '23 * * * *'   # hourly, at minute 23
   workflow_dispatch:
     inputs:
       publish:
@@ -24,7 +26,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      new: ${{ steps.compare.outputs.new }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: fancontrol.nuspec
+          sparse-checkout-cone-mode: false
+
+      - name: Compare upstream release with nuspec
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api repos/Rem0o/FanControl.Releases/releases/latest --jq .tag_name)
+          remote="${tag#[Vv]}.0.0"
+          current=$(grep -oP '(?<=<version>)[^<]+' fancontrol.nuspec)
+          echo "Upstream: $tag ($remote), nuspec: $current"
+          if [ "$remote" != "$current" ]; then
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::New FanControl version $remote found"
+          else
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          fi
+
   update:
+    needs: check
+    if: github.event_name == 'workflow_dispatch' || needs.check.outputs.new == 'true'
     runs-on: windows-latest
     timeout-minutes: 45
     defaults:
