@@ -1,0 +1,112 @@
+name: Update package
+
+# Checks daily for a new FanControl release. If there is one, it updates the
+# package (update.ps1 / Chocolatey-AU), verifies the installer, pushes to the
+# Chocolatey community repository and commits the change back to main.
+#
+# Requires the repository secret CHOCO_API_KEY.
+
+on:
+  schedule:
+    - cron: '23 5 * * *'   # daily, 05:23 UTC
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Push to Chocolatey and commit (uncheck for a dry run)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-package
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: powershell
+    env:
+      PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Chocolatey-AU
+        run: choco install chocolatey-au -y --no-progress
+
+      - name: Check for a new upstream release
+        id: au
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $before = ([xml](Get-Content .\fancontrol.nuspec)).package.metadata.version
+          .\update.ps1
+          $after = ([xml](Get-Content .\fancontrol.nuspec)).package.metadata.version
+          Write-Host "Version before: $before, after: $after"
+          "version=$after" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "updated=$([int]($before -ne $after))" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Verify installer (checksum, signature, Inno Setup)
+        if: steps.au.outputs.updated == '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $install = Get-Content .\tools\chocolateyinstall.ps1 -Raw
+          $url  = [regex]::Match($install, "url64bit\s*=\s*'([^']+)'").Groups[1].Value
+          $hash = [regex]::Match($install, "checksum64\s*=\s*'([^']+)'").Groups[1].Value
+          $tmp  = Join-Path $env:RUNNER_TEMP 'fancontrol-installer.exe'
+          Invoke-WebRequest $url -OutFile $tmp -UseBasicParsing
+
+          $actual = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $hash) { throw "Checksum mismatch: expected $hash, got $actual" }
+
+          $sig = Get-AuthenticodeSignature $tmp
+          Write-Host "Signature: $($sig.Status) / $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Mercier') {
+            throw 'Installer signature is missing, invalid or from an unexpected signer.'
+          }
+
+          $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($tmp))
+          if ($text -notmatch 'Inno Setup Setup Data \(([\d\.a-z]+)\)') {
+            throw 'Installer is no longer Inno Setup - the silent arguments need checking.'
+          }
+          Write-Host "Found $($Matches[0])"
+
+      - name: Push to Chocolatey
+        if: steps.au.outputs.updated == '1' && env.PUBLISH == 'true'
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          if (-not $env:CHOCO_API_KEY) { throw 'Repository secret CHOCO_API_KEY is not set.' }
+          $nupkg = "fancontrol.${{ steps.au.outputs.version }}.nupkg"
+          $out = choco push $nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) {
+            # Already pushed earlier (e.g. by hand, or a previous run whose git push failed).
+            if ($out -match '409|already exists') {
+              Write-Warning 'Version already on Chocolatey, continuing.'
+              $global:LASTEXITCODE = 0
+            }
+            else { exit $LASTEXITCODE }
+          }
+
+      - name: Commit and push
+        if: steps.au.outputs.updated == '1' && env.PUBLISH == 'true'
+        run: |
+          $v = '${{ steps.au.outputs.version }}'
+          $short = $v -replace '\.0\.0$', ''
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add fancontrol.nuspec tools/chocolateyinstall.ps1
+          git commit -m "Update FanControl package to $short" -m "Bump the package version and release notes to $short, and update the installer URL and SHA-256 checksum."
+          git push
+
+      - name: Upload package
+        if: steps.au.outputs.updated == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fancontrol-${{ steps.au.outputs.version }}
+          path: '*.nupkg'

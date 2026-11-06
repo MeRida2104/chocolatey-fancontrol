@@ -107,6 +107,22 @@ While a version is still in moderation it can be fixed and pushed again under th
 same version number — it moves to "Updated" at the top of the queue rather than
 losing its place.
 
+## Automatic updates (GitHub Actions)
+
+`.github/workflows/update.yml` runs daily on a Windows runner (and on demand via
+*Actions → Update package → Run workflow*). When upstream has a new release it:
+
+1. runs `update.ps1` (new URL, checksum, version, release notes, `choco pack`),
+2. checks checksum, Authenticode signature (`CN=Rémi Mercier`) and that the installer is still Inno Setup,
+3. pushes the nupkg to the community repository,
+4. commits the changed files back to `main`.
+
+Any failing check stops the run before anything is published. The manual "Run workflow"
+has a *publish* checkbox; unchecked it is a dry run that only builds and verifies.
+
+It needs the API key from <https://community.chocolatey.org/account> as the repository
+secret `CHOCO_API_KEY` (*Settings → Secrets and variables → Actions*).
+
 ## Updating to a new upstream release
 
 Upstream tags releases as `V271`, `V272` and so on. Chocolatey needs three-part
