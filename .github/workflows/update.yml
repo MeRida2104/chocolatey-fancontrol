@@ -30,11 +30,16 @@ jobs:
     defaults:
       run:
         shell: powershell
+        # Chocolatey-AU expects <folder name>.nuspec, so the checkout folder
+        # must be called "fancontrol", not the repository name.
+        working-directory: fancontrol
     env:
       PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          path: fancontrol
 
       - name: Install Chocolatey-AU
         run: choco install chocolatey-au -y --no-progress
@@ -106,7 +111,7 @@ jobs:
 
       - name: Upload package
         if: steps.au.outputs.updated == '1'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: fancontrol-${{ steps.au.outputs.version }}
-          path: '*.nupkg'
+          path: 'fancontrol/*.nupkg'
